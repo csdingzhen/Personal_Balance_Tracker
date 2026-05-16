@@ -1,0 +1,40 @@
+# dependencies
+node_modules/
+
+# environment variables
+.env
+.env.*
+!.env.example
+
+# build output
+dist/
+build/
+.next/
+out/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# local database files
+*.sqlite
+*.sqlite3
+
+# coverage
+coverage/
+
+# misc
+tmp/
+temp/
+
+# claude
+.claude

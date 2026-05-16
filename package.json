@@ -1,0 +1,11 @@
+{
+  "name": "personal-balance-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "seed": "npm run seed --prefix backend",
+    "db:migrate": "npm run db:migrate --prefix backend"
+  }
+}
