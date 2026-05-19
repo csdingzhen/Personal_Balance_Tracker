@@ -12,6 +12,8 @@ model Institution {
   logo        String?
   lastSynced  DateTime?
   plaidItemId String?   @unique
+  accessToken String?
+  plaidCursor String?
   accounts    Account[]
 }
 
@@ -29,14 +31,15 @@ model Account {
 }
 
 model Transaction {
-  id           String   @id @default(cuid())
-  accountId    String
-  account      Account  @relation(fields: [accountId], references: [id])
-  amount       Float
-  category     String?
-  merchantName String?
-  date         DateTime
-  pending      Boolean  @default(false)
+  id                 String   @id @default(cuid())
+  accountId          String
+  account            Account  @relation(fields: [accountId], references: [id])
+  amount             Float
+  category           String?
+  merchantName       String?
+  date               DateTime
+  pending            Boolean  @default(false)
+  plaidTransactionId String?  @unique
 }
 
 model Budget {

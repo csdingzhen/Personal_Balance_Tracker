@@ -5,6 +5,7 @@ export interface Institution {
   name: string;
   logo: string | null;
   lastSynced: string | null;
+  isPlaidLinked: boolean;
 }
 
 export interface Account {

@@ -31,6 +31,7 @@ app.get('/', async (c) => {
       name: inst.name,
       logo: inst.logo,
       lastSynced: inst.lastSynced?.toISOString() ?? null,
+      isPlaidLinked: inst.plaidItemId !== null,
     },
     accounts: inst.accounts.map((a) => ({
       id: a.id,
