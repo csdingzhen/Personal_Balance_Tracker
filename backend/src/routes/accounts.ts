@@ -49,7 +49,7 @@ app.get('/:id', async (c) => {
 });
 
 // Toggle hidden status
-app.patch('/:id', async (c) => {
+app.put('/:id', async (c) => {
   const { hidden } = await c.req.json() as { hidden: boolean };
   const account = await prisma.account.update({
     where: { id: c.req.param('id') },
