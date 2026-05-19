@@ -4,55 +4,35 @@ import { api } from '../api/client';
 import type { Account, Institution } from '@shared/types';
 
 interface AccountWithHidden extends Account { hidden: boolean }
-interface InstitutionGroup {
-  institution: Institution;
-  accounts: AccountWithHidden[];
-}
+interface InstitutionGroup { institution: Institution; accounts: AccountWithHidden[] }
+
+const TYPE_STYLES: Record<string, { dot: string; label: string }> = {
+  checking:   { dot: 'oklch(0.76 0.12 220)', label: 'Checking' },
+  savings:    { dot: 'oklch(0.80 0.15 155)', label: 'Savings' },
+  credit:     { dot: 'oklch(0.72 0.16 28)',  label: 'Credit' },
+  investment: { dot: 'oklch(0.86 0.13 200)', label: 'Invest' },
+};
 
 function fmt(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Math.abs(n));
 }
 
-function typeBadge(type: string) {
-  const map: Record<string, string> = {
-    checking:   'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    savings:    'bg-green-500/20 text-green-400 border-green-500/30',
-    credit:     'bg-red-500/20 text-red-400 border-red-500/30',
-    investment: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  };
-  return map[type] ?? 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-}
-
-// ── Confirm delete dialog ─────────────────────────────────────────────────────
-function DeleteConfirm({
-  account,
-  onConfirm,
-  onCancel,
-}: {
-  account: AccountWithHidden;
-  onConfirm: () => void;
-  onCancel: () => void;
+function DeleteConfirm({ account, onConfirm, onCancel }: {
+  account: AccountWithHidden; onConfirm: () => void; onCancel: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 className="text-white font-semibold text-lg mb-2">Delete account?</h3>
-        <p className="text-gray-400 text-sm mb-1">
-          <span className="text-white">{account.name}</span> and all its associated
-          transactions and investments will be permanently deleted.
+      <div className="card p-6 w-full max-w-sm shadow-2xl">
+        <h3 className="text-text font-semibold text-lg mb-2">Delete account?</h3>
+        <p className="text-text-muted text-sm mb-1">
+          <span className="text-text">{account.name}</span> and all its transactions and investments will be permanently deleted.
         </p>
-        <p className="text-red-400 text-xs mb-6">This cannot be undone.</p>
+        <p className="text-negative text-xs mb-6">This cannot be undone.</p>
         <div className="flex gap-3">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
-          >
+          <button onClick={onCancel} className="btn flex-1 justify-center">Cancel</button>
+          <button onClick={onConfirm}
+            className="btn btn-primary flex-1 justify-center"
+            style={{ background: 'oklch(0.72 0.16 28)', color: 'white' }}>
             Delete
           </button>
         </div>
@@ -61,7 +41,6 @@ function DeleteConfirm({
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
 export default function Accounts() {
   const [groups, setGroups] = useState<InstitutionGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,202 +48,178 @@ export default function Accounts() {
   const [pendingDelete, setPendingDelete] = useState<AccountWithHidden | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
 
-  function load(showHidden = true) {
+  function load() {
     setLoading(true);
-    api.get<InstitutionGroup[]>(`/accounts?showHidden=${showHidden}`)
+    api.get<InstitutionGroup[]>('/accounts?showHidden=true')
       .then(setGroups)
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(true); }, []);
+  useEffect(() => { load(); }, []);
 
   async function toggleHidden(account: AccountWithHidden) {
-    setBusy((s) => new Set(s).add(account.id));
+    setBusy(s => new Set(s).add(account.id));
     try {
       await api.put(`/accounts/${account.id}`, { hidden: !account.hidden });
-      setGroups((prev) =>
-        prev.map((g) => ({
-          ...g,
-          accounts: g.accounts.map((a) =>
-            a.id === account.id ? { ...a, hidden: !a.hidden } : a
-          ),
-        }))
-      );
+      setGroups(prev => prev.map(g => ({
+        ...g,
+        accounts: g.accounts.map(a => a.id === account.id ? { ...a, hidden: !a.hidden } : a),
+      })));
     } finally {
-      setBusy((s) => { const n = new Set(s); n.delete(account.id); return n; });
+      setBusy(s => { const n = new Set(s); n.delete(account.id); return n; });
     }
   }
 
   async function deleteAccount(account: AccountWithHidden) {
     setPendingDelete(null);
-    setBusy((s) => new Set(s).add(account.id));
+    setBusy(s => new Set(s).add(account.id));
     try {
       await api.del(`/accounts/${account.id}`);
-      setGroups((prev) =>
-        prev
-          .map((g) => ({ ...g, accounts: g.accounts.filter((a) => a.id !== account.id) }))
-          .filter((g) => g.accounts.length > 0)
+      setGroups(prev =>
+        prev.map(g => ({ ...g, accounts: g.accounts.filter(a => a.id !== account.id) }))
+          .filter(g => g.accounts.length > 0)
       );
     } finally {
-      setBusy((s) => { const n = new Set(s); n.delete(account.id); return n; });
+      setBusy(s => { const n = new Set(s); n.delete(account.id); return n; });
     }
   }
 
-  const allAccounts = groups.flatMap((g) => g.accounts);
-  const visibleAccounts = allAccounts.filter((a) => !a.hidden);
-  const totalNet = visibleAccounts.reduce((s, a) => s + a.balance, 0);
-  const hiddenCount = allAccounts.filter((a) => a.hidden).length;
+  const allAccounts = groups.flatMap(g => g.accounts);
+  const visible = allAccounts.filter(a => !a.hidden);
+  const assets = visible.filter(a => a.balance > 0).reduce((s, a) => s + a.balance, 0);
+  const liabilities = visible.filter(a => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
+  const net = assets - liabilities;
+  const hiddenCount = allAccounts.filter(a => a.hidden).length;
 
   if (loading) return (
-    <div className="p-8 flex items-center gap-3 text-gray-400">
-      <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      Loading accounts...
+    <div className="p-7 flex items-center gap-3 text-text-dim text-sm">
+      <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      Loading...
     </div>
   );
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-7 space-y-5 max-w-[900px]">
       {pendingDelete && (
-        <DeleteConfirm
-          account={pendingDelete}
+        <DeleteConfirm account={pendingDelete}
           onConfirm={() => deleteAccount(pendingDelete)}
-          onCancel={() => setPendingDelete(null)}
-        />
+          onCancel={() => setPendingDelete(null)} />
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Accounts</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            Net balance:{' '}
-            <span className={totalNet >= 0 ? 'text-green-400' : 'text-red-400'}>
-              {totalNet < 0 ? '-' : ''}{fmt(totalNet)}
-            </span>
+          <h1 className="text-[22px] font-semibold text-text tracking-[-0.02em]">Accounts</h1>
+          {/* Assets / Liabilities / Net split */}
+          <div className="flex items-center gap-4 mt-2">
+            <div>
+              <p className="eyebrow">Assets</p>
+              <p className="num text-sm font-medium text-positive mt-0.5">{fmt(assets)}</p>
+            </div>
+            <div className="h-6 w-px bg-border-soft" />
+            <div>
+              <p className="eyebrow">Liabilities</p>
+              <p className="num text-sm font-medium text-negative mt-0.5">{fmt(liabilities)}</p>
+            </div>
+            <div className="h-6 w-px bg-border-soft" />
+            <div>
+              <p className="eyebrow">Net</p>
+              <p className={`num text-sm font-medium mt-0.5 ${net >= 0 ? 'text-text' : 'text-negative'}`}>
+                {net < 0 ? '-' : ''}{fmt(net)}
+              </p>
+            </div>
             {hiddenCount > 0 && !editMode && (
-              <span className="ml-3 text-gray-600 text-xs">{hiddenCount} hidden</span>
+              <span className="text-text-dim text-xs ml-1">{hiddenCount} hidden</span>
             )}
-          </p>
+          </div>
         </div>
 
         <button
-          onClick={() => setEditMode((e) => !e)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            editMode
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-gray-600'
-          }`}
-        >
-          {editMode ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit Accounts</>}
+          onClick={() => setEditMode(e => !e)}
+          className={`btn ${editMode ? 'btn-primary' : ''}`}>
+          {editMode ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit</>}
         </button>
       </div>
 
-      {/* Edit mode banner */}
       {editMode && (
-        <div className="flex items-center gap-2 bg-indigo-600/10 border border-indigo-500/20 rounded-lg px-4 py-2.5 text-sm text-indigo-300">
+        <div className="flex items-center gap-2 bg-accent-soft border border-accent/20 rounded-lg px-4 py-2.5 text-sm text-accent">
           <Pencil size={13} />
-          Edit mode — hide accounts to exclude them from all views, or delete to permanently remove all data.
+          Hide accounts to exclude them from all views, or delete to permanently remove all data.
         </div>
       )}
 
-      {/* Institution groups */}
-      <div className="space-y-6">
+      {/* Groups */}
+      <div className="space-y-4">
         {groups.map(({ institution, accounts }) => {
-          const visibleAccs = accounts.filter((a) => !a.hidden);
-          const instTotal = visibleAccs.reduce((s, a) => s + a.balance, 0);
-
+          const instTotal = accounts.filter(a => !a.hidden).reduce((s, a) => s + a.balance, 0);
           return (
-            <div key={institution.id} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+            <div key={institution.id} className="card overflow-hidden">
               {/* Institution header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+              <div className="card-head">
                 <div className="flex items-center gap-3">
                   {institution.logo ? (
                     <img src={institution.logo} alt={institution.name}
-                      className="w-8 h-8 rounded-full bg-gray-700"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      className="w-8 h-8 rounded-full bg-surface-hi"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
-                      <Building2 size={14} className="text-gray-400" />
+                    <div className="w-8 h-8 rounded-full bg-surface-hi flex items-center justify-center">
+                      <Building2 size={14} className="text-text-dim" />
                     </div>
                   )}
                   <div>
-                    <p className="text-white font-semibold">{institution.name}</p>
+                    <p className="text-text font-medium text-sm">{institution.name}</p>
                     {institution.lastSynced && (
-                      <p className="text-gray-500 text-xs flex items-center gap-1">
-                        <RefreshCw size={10} />
-                        Synced {new Date(institution.lastSynced).toLocaleDateString()}
+                      <p className="eyebrow flex items-center gap-1 mt-0.5">
+                        <RefreshCw size={9} />
+                        {new Date(institution.lastSynced).toLocaleDateString()}
                       </p>
                     )}
                   </div>
                 </div>
                 {!editMode && (
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">Total</p>
-                    <p className={`font-semibold ${instTotal < 0 ? 'text-red-400' : 'text-white'}`}>
+                    <p className="eyebrow">Total</p>
+                    <p className={`num text-sm font-medium mt-0.5 ${instTotal < 0 ? 'text-negative' : 'text-text'}`}>
                       {instTotal < 0 ? '-' : ''}{fmt(instTotal)}
                     </p>
                   </div>
                 )}
               </div>
 
-              {/* Accounts */}
-              {accounts.map((account) => {
+              {/* Account rows */}
+              {accounts.map(account => {
                 const isBusy = busy.has(account.id);
+                const ts = TYPE_STYLES[account.type] ?? TYPE_STYLES.checking;
                 return (
-                  <div
-                    key={account.id}
-                    className={`flex items-center justify-between px-6 py-4 border-b border-gray-700/50 last:border-0 transition-opacity ${
-                      account.hidden ? 'opacity-40' : ''
-                    }`}
-                  >
+                  <div key={account.id}
+                    className={`flex items-center justify-between px-5 py-3.5 border-b border-border-soft last:border-0 transition-opacity ${account.hidden ? 'opacity-40' : ''}`}>
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${typeBadge(account.type)}`}>
-                        {account.type}
-                      </span>
-                      <span className={`text-sm truncate ${account.hidden ? 'line-through text-gray-500' : 'text-gray-200'}`}>
-                        {account.name}
-                      </span>
-                      {account.hidden && (
-                        <span className="text-xs text-gray-600 shrink-0">hidden</span>
-                      )}
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: ts.dot }} />
+                      <div className="min-w-0">
+                        <p className={`text-sm truncate ${account.hidden ? 'line-through text-text-muted' : 'text-text-2'}`}>
+                          {account.name}
+                        </p>
+                        <p className="eyebrow mt-0.5">{ts.label}{account.hidden ? ' · hidden' : ''}</p>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                      {!editMode && (
-                        <div className="text-right">
-                          <p className={`font-semibold ${account.balance < 0 ? 'text-red-400' : 'text-white'}`}>
-                            {account.balance < 0 ? '-' : ''}{fmt(account.balance)}
-                          </p>
-                          <p className="text-gray-500 text-xs">{account.currency}</p>
-                        </div>
-                      )}
+                      <p className={`num text-sm font-medium ${account.balance < 0 ? 'text-negative' : editMode ? 'text-text-muted' : 'text-text'}`}>
+                        {account.balance < 0 ? '-' : ''}{fmt(account.balance)}
+                      </p>
 
                       {editMode && (
-                        <div className="flex items-center gap-2">
-                          <p className={`text-sm font-medium mr-2 ${account.balance < 0 ? 'text-red-400' : 'text-gray-300'}`}>
-                            {account.balance < 0 ? '-' : ''}{fmt(account.balance)}
-                          </p>
-
-                          {/* Hide / Show toggle */}
-                          <button
-                            onClick={() => toggleHidden(account)}
-                            disabled={isBusy}
-                            title={account.hidden ? 'Show account' : 'Hide account'}
-                            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors disabled:opacity-40"
-                          >
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => toggleHidden(account)} disabled={isBusy}
+                            title={account.hidden ? 'Show' : 'Hide'}
+                            className="btn btn-ghost h-[30px] px-2 disabled:opacity-40">
                             {isBusy
-                              ? <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                              : account.hidden ? <Eye size={15} /> : <EyeOff size={15} />}
+                              ? <div className="w-3.5 h-3.5 border-2 border-text-dim border-t-transparent rounded-full animate-spin" />
+                              : account.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
                           </button>
-
-                          {/* Delete */}
-                          <button
-                            onClick={() => setPendingDelete(account)}
-                            disabled={isBusy}
-                            title="Delete account and all data"
-                            className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                          >
-                            <Trash2 size={15} />
+                          <button onClick={() => setPendingDelete(account)} disabled={isBusy}
+                            className="btn btn-ghost h-[30px] px-2 disabled:opacity-40 hover:text-negative">
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       )}
@@ -277,13 +232,10 @@ export default function Accounts() {
         })}
       </div>
 
-      {/* Exit edit mode shortcut */}
       {editMode && (
-        <button
-          onClick={() => setEditMode(false)}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-white transition-colors mx-auto"
-        >
-          <X size={14} /> Exit edit mode
+        <button onClick={() => setEditMode(false)}
+          className="flex items-center gap-2 btn btn-ghost text-sm mx-auto">
+          <X size={13} /> Exit edit mode
         </button>
       )}
     </div>

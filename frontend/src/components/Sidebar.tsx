@@ -1,13 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Wallet,
-  Receipt,
-  PiggyBank,
-  TrendingUp,
-  Upload,
-  Link2,
-} from 'lucide-react';
+import { LayoutDashboard, Wallet, Receipt, PiggyBank, TrendingUp, Upload, Link2 } from 'lucide-react';
 
 const nav = [
   { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
@@ -21,40 +13,46 @@ const nav = [
 
 export default function Sidebar() {
   return (
-    <aside className="w-60 flex-shrink-0 flex flex-col bg-gray-950 border-r border-gray-800 h-screen sticky top-0">
+    <aside className="w-[220px] flex-shrink-0 flex flex-col bg-bg-deep border-r border-border-soft h-screen sticky top-0">
       {/* Logo */}
-      <div className="px-6 py-5 border-b border-gray-800">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <TrendingUp size={14} className="text-white" />
-          </div>
-          <span className="font-semibold text-white text-sm tracking-wide">Balance Tracker</span>
+      <div className="px-5 py-4 border-b border-border-soft flex items-center gap-3">
+        <div
+          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+          style={{
+            background: 'conic-gradient(from 135deg at 60% 40%, oklch(0.86 0.13 200), oklch(0.72 0.12 200) 40%, oklch(0.35 0.06 200) 70%, oklch(0.86 0.13 200))',
+          }}
+        >
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none"
+            stroke="oklch(0.125 0.005 60)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1.5 10.5 5 7 7.5 9 12.5 3.5" />
+          </svg>
         </div>
+        <span className="font-medium text-text text-[15px] tracking-[-0.01em]">NeverBroke</span>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-2 py-3 space-y-px overflow-y-auto">
         {nav.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              `flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
                 isActive
-                  ? 'bg-indigo-600/20 text-indigo-400'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                  ? 'bg-accent-soft text-accent font-medium'
+                  : 'text-text-muted hover:bg-surface hover:text-text-2'
               }`
             }
           >
-            <Icon size={16} />
+            <Icon size={15} strokeWidth={1.7} />
             {label}
           </NavLink>
         ))}
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-gray-800">
-        <p className="text-xs text-gray-500">Personal use only</p>
+      <div className="px-5 py-4 border-t border-border-soft">
+        <p className="eyebrow">Personal Finance</p>
       </div>
     </aside>
   );

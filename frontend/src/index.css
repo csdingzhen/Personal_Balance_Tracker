@@ -4,16 +4,54 @@
 
 @layer base {
   body {
-    @apply bg-gray-900 text-white antialiased;
+    @apply bg-bg text-text font-sans antialiased;
+    font-feature-settings: "ss01", "cv11";
+    letter-spacing: -0.005em;
   }
 
-  ::-webkit-scrollbar {
-    width: 6px;
+  .num {
+    @apply font-mono;
+    font-feature-settings: "tnum", "zero";
+    letter-spacing: -0.01em;
   }
-  ::-webkit-scrollbar-track {
-    @apply bg-gray-900;
+
+  .eyebrow {
+    @apply font-mono text-[10.5px] uppercase text-text-dim;
+    letter-spacing: 0.14em;
   }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { @apply bg-bg; }
   ::-webkit-scrollbar-thumb {
-    @apply bg-gray-600 rounded-full;
+    @apply bg-surface-2 rounded-full;
+    border: 2px solid theme('colors.bg');
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border-soft rounded-lg;
+  }
+  .card-head {
+    @apply flex items-center justify-between px-5 py-4 border-b border-border-soft;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 h-[34px] px-[13px]
+           bg-surface border border-border rounded text-sm text-text-2
+           hover:bg-surface-2 hover:border-border-hi hover:text-text
+           transition-colors cursor-pointer select-none;
+  }
+  .btn-primary {
+    @apply bg-accent text-bg-deep border-transparent font-medium
+           hover:bg-accent-2;
+  }
+  .btn-ghost {
+    @apply bg-transparent border-transparent text-text-muted
+           hover:text-text hover:bg-surface;
+  }
+  .cat-pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full
+           text-[11.5px] text-text-2 bg-surface-hi;
+    box-shadow: inset 0 0 0 1px theme('colors.border.DEFAULT');
   }
 }
