@@ -26,6 +26,7 @@ model Account {
   balance        Float
   currency       String        @default("USD")
   plaidAccountId String?       @unique
+  hidden         Boolean       @default(false)
   transactions   Transaction[]
   investments    Investment[]
 }

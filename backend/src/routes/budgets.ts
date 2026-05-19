@@ -21,6 +21,7 @@ app.get('/', async (c) => {
       date: { gte: monthStart, lte: monthEnd },
       amount: { lt: 0 },
       category: { not: null },
+      account: { hidden: false },
     },
   });
 

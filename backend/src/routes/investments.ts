@@ -6,6 +6,7 @@ const app = new Hono();
 
 app.get('/', async (c) => {
   const holdings = await prisma.investment.findMany({
+    where: { account: { hidden: false } },
     include: { account: { select: { id: true, name: true } } },
     orderBy: [{ account: { name: 'asc' } }, { ticker: 'asc' }],
   });

@@ -6,7 +6,7 @@ const app = new Hono();
 
 app.get('/', async (c) => {
   const institutions = await prisma.institution.findMany({
-    include: { accounts: true },
+    include: { accounts: { where: { hidden: false } } },
   });
 
   const allAccounts = institutions.flatMap((i) => i.accounts);

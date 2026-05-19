@@ -6,7 +6,9 @@ const app = new Hono();
 app.get('/', async (c) => {
   const { search, accountId, category, startDate, endDate, page = '1', limit = '50' } = c.req.query();
 
-  const where: Parameters<typeof prisma.transaction.findMany>[0]['where'] = {};
+  const where: Parameters<typeof prisma.transaction.findMany>[0]['where'] = {
+    account: { hidden: false },
+  };
 
   if (accountId) where.accountId = accountId;
   if (category) where.category = category;
