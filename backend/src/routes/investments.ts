@@ -1,12 +1,16 @@
 import { Hono } from 'hono';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 import type { InvestmentSummary } from '../../../shared/types';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
 app.get('/', async (c) => {
+  const userId = c.get('userId');
+
   const holdings = await prisma.investment.findMany({
-    where: { account: { hidden: false } },
+    where: { account: { institution: { userId }, hidden: false } },
     include: { account: { select: { id: true, name: true } } },
     orderBy: [{ account: { name: 'asc' } }, { ticker: 'asc' }],
   });
@@ -16,7 +20,6 @@ app.get('/', async (c) => {
   const totalGainLoss = totalValue - totalCostBasis;
   const totalGainLossPct = totalCostBasis > 0 ? (totalGainLoss / totalCostBasis) * 100 : 0;
 
-  // Generate 30-day performance history
   const performanceHistory = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (29 - i));

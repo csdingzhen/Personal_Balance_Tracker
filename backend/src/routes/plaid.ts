@@ -3,10 +3,10 @@ import { Products, CountryCode } from 'plaid';
 import { getPlaidClient } from '../lib/plaid';
 import { prisma } from '../lib/prisma';
 import { encrypt, decrypt } from '../lib/encryption';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
 
-/** Extract a readable message from a Plaid AxiosError. */
 function plaidErrorMessage(err: unknown): string {
   const e = err as { response?: { data?: { error_message?: string; error_code?: string } } };
   if (e?.response?.data?.error_message) {
@@ -15,12 +15,12 @@ function plaidErrorMessage(err: unknown): string {
   return String(err);
 }
 
-// ── Create Plaid Link token ───────────────────────────────────────────────────
-app.post('/link-token', async (c) => {
+// link-token is public so the frontend can initialize Plaid Link before any data loads
+app.post('/link-token', requireAuth, async (c) => {
   try {
     const response = await getPlaidClient().linkTokenCreate({
-      user: { client_user_id: 'local-user' },
-      client_name: 'Personal Balance Tracker',
+      user: { client_user_id: c.get('userId') },
+      client_name: 'NeverBroke',
       products: [Products.Transactions],
       country_codes: [CountryCode.Us],
       language: 'en',
@@ -33,8 +33,8 @@ app.post('/link-token', async (c) => {
   }
 });
 
-// ── Exchange public token, store encrypted access token ───────────────────────
-app.post('/exchange', async (c) => {
+app.post('/exchange', requireAuth, async (c) => {
+  const userId = c.get('userId');
   const { public_token, institution_name, institution_logo } = await c.req.json();
 
   try {
@@ -49,6 +49,7 @@ app.post('/exchange', async (c) => {
     const institution = await prisma.institution.upsert({
       where: { plaidItemId: itemId },
       create: {
+        userId,
         name: institution_name ?? 'Unknown Bank',
         logo: institution_logo ?? null,
         lastSynced: new Date(),
@@ -73,10 +74,7 @@ app.post('/exchange', async (c) => {
           currency: pa.balances.iso_currency_code ?? 'USD',
           plaidAccountId: pa.account_id,
         },
-        update: {
-          balance: pa.balances.current ?? 0,
-          name: pa.name,
-        },
+        update: { balance: pa.balances.current ?? 0, name: pa.name },
       });
     }
 
@@ -88,29 +86,27 @@ app.post('/exchange', async (c) => {
   }
 });
 
-// ── Sync balances + transactions for a linked institution ─────────────────────
-app.post('/sync/:institutionId', async (c) => {
-  const institution = await prisma.institution.findUnique({
-    where: { id: c.req.param('institutionId') },
+app.post('/sync/:institutionId', requireAuth, async (c) => {
+  const userId = c.get('userId');
+
+  const institution = await prisma.institution.findFirst({
+    where: { id: c.req.param('institutionId'), userId },
     include: { accounts: true },
   });
 
   if (!institution) return c.json({ error: 'Institution not found' }, 404);
-  if (!institution.accessToken) {
-    return c.json({ error: 'Institution has no linked Plaid account' }, 400);
-  }
+  if (!institution.accessToken) return c.json({ error: 'Institution has no linked Plaid account' }, 400);
 
   let accessToken: string;
   try {
     accessToken = decrypt(institution.accessToken);
   } catch {
-    return c.json({ error: 'Failed to decrypt access token — check ENCRYPTION_KEY' }, 500);
+    return c.json({ error: 'Failed to decrypt access token' }, 500);
   }
 
   try {
     const client = getPlaidClient();
 
-    // 1. Refresh account balances
     const accountsRes = await client.accountsGet({ access_token: accessToken });
     for (const pa of accountsRes.data.accounts) {
       await prisma.account.updateMany({
@@ -119,19 +115,13 @@ app.post('/sync/:institutionId', async (c) => {
       });
     }
 
-    // 2. Sync transactions via cursor (paginated)
     let cursor: string | undefined = institution.plaidCursor ?? undefined;
     let totalAdded = 0;
     let totalRemoved = 0;
     let hasMore = true;
 
     while (hasMore) {
-      const txRes = await client.transactionsSync({
-        access_token: accessToken,
-        cursor,
-        count: 500,
-      });
-
+      const txRes = await client.transactionsSync({ access_token: accessToken, cursor, count: 500 });
       const { added, modified, removed, next_cursor, has_more } = txRes.data;
 
       for (const tx of added) {
@@ -141,9 +131,8 @@ app.post('/sync/:institutionId', async (c) => {
           where: { plaidTransactionId: tx.transaction_id },
           create: {
             accountId: account.id,
-            amount: -tx.amount, // Plaid positive = debit → store as negative
-            category: tx.personal_finance_category?.primary?.replace(/_/g, ' ')
-              ?? tx.category?.[0] ?? null,
+            amount: -tx.amount,
+            category: tx.personal_finance_category?.primary?.replace(/_/g, ' ') ?? tx.category?.[0] ?? null,
             merchantName: tx.merchant_name ?? tx.name ?? null,
             date: new Date(tx.date),
             pending: tx.pending,
@@ -153,8 +142,7 @@ app.post('/sync/:institutionId', async (c) => {
             amount: -tx.amount,
             pending: tx.pending,
             merchantName: tx.merchant_name ?? tx.name ?? null,
-            category: tx.personal_finance_category?.primary?.replace(/_/g, ' ')
-              ?? tx.category?.[0] ?? null,
+            category: tx.personal_finance_category?.primary?.replace(/_/g, ' ') ?? tx.category?.[0] ?? null,
           },
         });
         totalAdded++;
@@ -163,18 +151,12 @@ app.post('/sync/:institutionId', async (c) => {
       for (const tx of modified) {
         await prisma.transaction.updateMany({
           where: { plaidTransactionId: tx.transaction_id },
-          data: {
-            amount: -tx.amount,
-            pending: tx.pending,
-            merchantName: tx.merchant_name ?? tx.name ?? null,
-          },
+          data: { amount: -tx.amount, pending: tx.pending, merchantName: tx.merchant_name ?? tx.name ?? null },
         });
       }
 
       for (const tx of removed) {
-        await prisma.transaction.deleteMany({
-          where: { plaidTransactionId: tx.transaction_id },
-        });
+        await prisma.transaction.deleteMany({ where: { plaidTransactionId: tx.transaction_id } });
         totalRemoved++;
       }
 

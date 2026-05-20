@@ -1,12 +1,16 @@
 import { Hono } from 'hono';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
 app.get('/', async (c) => {
+  const userId = c.get('userId');
   const showHidden = c.req.query('showHidden') === 'true';
 
   const institutions = await prisma.institution.findMany({
+    where: { userId },
     include: {
       accounts: {
         where: showHidden ? {} : { hidden: false },
@@ -40,30 +44,37 @@ app.get('/', async (c) => {
 });
 
 app.get('/:id', async (c) => {
-  const account = await prisma.account.findUnique({
-    where: { id: c.req.param('id') },
+  const userId = c.get('userId');
+  const account = await prisma.account.findFirst({
+    where: { id: c.req.param('id'), institution: { userId } },
     include: { institution: true },
   });
   if (!account) return c.json({ error: 'Not found' }, 404);
   return c.json(account);
 });
 
-// Toggle hidden status
 app.put('/:id', async (c) => {
+  const userId = c.get('userId');
   const { hidden } = await c.req.json() as { hidden: boolean };
-  const account = await prisma.account.update({
+
+  const account = await prisma.account.findFirst({
+    where: { id: c.req.param('id'), institution: { userId } },
+  });
+  if (!account) return c.json({ error: 'Not found' }, 404);
+
+  const updated = await prisma.account.update({
     where: { id: c.req.param('id') },
     data: { hidden },
   });
-  return c.json({ id: account.id, hidden: account.hidden });
+  return c.json({ id: updated.id, hidden: updated.hidden });
 });
 
-// Delete account and all related data
 app.delete('/:id', async (c) => {
+  const userId = c.get('userId');
   const id = c.req.param('id');
 
-  const account = await prisma.account.findUnique({
-    where: { id },
+  const account = await prisma.account.findFirst({
+    where: { id, institution: { userId } },
     select: { institutionId: true },
   });
   if (!account) return c.json({ error: 'Not found' }, 404);
@@ -74,7 +85,6 @@ app.delete('/:id', async (c) => {
     prisma.account.delete({ where: { id } }),
   ]);
 
-  // Clean up institution if it has no remaining accounts
   const remaining = await prisma.account.count({
     where: { institutionId: account.institutionId },
   });

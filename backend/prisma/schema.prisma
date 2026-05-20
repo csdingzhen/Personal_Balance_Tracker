@@ -6,8 +6,19 @@ datasource db {
   provider = "sqlite"
 }
 
+model User {
+  id           String        @id @default(cuid())
+  username     String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  institutions Institution[]
+  budgets      Budget[]
+}
+
 model Institution {
   id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
   name        String
   logo        String?
   lastSynced  DateTime?
@@ -45,13 +56,15 @@ model Transaction {
 
 model Budget {
   id           String @id @default(cuid())
+  userId       String
+  user         User   @relation(fields: [userId], references: [id])
   category     String
   monthlyLimit Float
   currentSpend Float  @default(0)
   month        Int
   year         Int
 
-  @@unique([category, month, year])
+  @@unique([userId, category, month, year])
 }
 
 model Investment {

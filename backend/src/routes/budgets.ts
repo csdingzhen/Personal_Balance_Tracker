@@ -1,18 +1,20 @@
 import { Hono } from 'hono';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
 app.get('/', async (c) => {
+  const userId = c.get('userId');
   const now = new Date();
   const month = parseInt(c.req.query('month') ?? String(now.getMonth() + 1));
   const year = parseInt(c.req.query('year') ?? String(now.getFullYear()));
 
-  // Compute currentSpend from actual transactions for this month
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 0, 23, 59, 59);
 
-  const budgets = await prisma.budget.findMany({ where: { month, year } });
+  const budgets = await prisma.budget.findMany({ where: { userId, month, year } });
 
   const txByCategory = await prisma.transaction.groupBy({
     by: ['category'],
@@ -21,7 +23,7 @@ app.get('/', async (c) => {
       date: { gte: monthStart, lte: monthEnd },
       amount: { lt: 0 },
       category: { not: null },
-      account: { hidden: false },
+      account: { institution: { userId }, hidden: false },
     },
   });
 
@@ -42,35 +44,37 @@ app.get('/', async (c) => {
 });
 
 app.post('/', async (c) => {
+  const userId = c.get('userId');
   const body = await c.req.json();
   const now = new Date();
   const month = body.month ?? now.getMonth() + 1;
   const year = body.year ?? now.getFullYear();
 
   const budget = await prisma.budget.upsert({
-    where: { category_month_year: { category: body.category, month, year } },
-    create: {
-      category: body.category,
-      monthlyLimit: body.monthlyLimit,
-      currentSpend: 0,
-      month,
-      year,
-    },
+    where: { userId_category_month_year: { userId, category: body.category, month, year } },
+    create: { userId, category: body.category, monthlyLimit: body.monthlyLimit, currentSpend: 0, month, year },
     update: { monthlyLimit: body.monthlyLimit },
   });
   return c.json(budget, 201);
 });
 
 app.put('/:id', async (c) => {
-  const body = await c.req.json();
-  const budget = await prisma.budget.update({
+  const userId = c.get('userId');
+  const budget = await prisma.budget.findFirst({ where: { id: c.req.param('id'), userId } });
+  if (!budget) return c.json({ error: 'Not found' }, 404);
+
+  const updated = await prisma.budget.update({
     where: { id: c.req.param('id') },
-    data: { monthlyLimit: body.monthlyLimit },
+    data: { monthlyLimit: (await c.req.json()).monthlyLimit },
   });
-  return c.json(budget);
+  return c.json(updated);
 });
 
 app.delete('/:id', async (c) => {
+  const userId = c.get('userId');
+  const budget = await prisma.budget.findFirst({ where: { id: c.req.param('id'), userId } });
+  if (!budget) return c.json({ error: 'Not found' }, 404);
+
   await prisma.budget.delete({ where: { id: c.req.param('id') } });
   return c.json({ success: true });
 });

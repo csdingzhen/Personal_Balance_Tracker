@@ -1,48 +1,42 @@
 import { Hono } from 'hono';
 import { parse } from 'csv-parse/sync';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 import type { CSVPreviewRow } from '../../../shared/types';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
-// Parse CSV and return preview rows
 app.post('/preview', async (c) => {
   const formData = await c.req.formData();
   const file = formData.get('file') as File | null;
   if (!file) return c.json({ error: 'No file uploaded' }, 400);
 
   const text = await file.text();
-
   try {
-    const records = parse(text, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    }) as Record<string, string>[];
-
+    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
     const rows: CSVPreviewRow[] = records.slice(0, 50).map((r) => ({
       date: r.Date ?? r.date ?? r.DATE ?? '',
       merchantName: r.Description ?? r.description ?? r.Merchant ?? r.merchant ?? r.Name ?? '',
       amount: parseFloat(r.Amount ?? r.amount ?? '0'),
       category: r.Category ?? r.category ?? 'Uncategorized',
     }));
-
     return c.json({ rows });
   } catch {
     return c.json({ error: 'Failed to parse CSV. Ensure it has headers.' }, 400);
   }
 });
 
-// Confirm and import CSV rows
 app.post('/confirm', async (c) => {
-  const { accountId, rows } = await c.req.json() as {
-    accountId: string;
-    rows: CSVPreviewRow[];
-  };
+  const userId = c.get('userId');
+  const { accountId, rows } = await c.req.json() as { accountId: string; rows: CSVPreviewRow[] };
 
-  if (!accountId || !rows?.length) {
-    return c.json({ error: 'accountId and rows are required' }, 400);
-  }
+  if (!accountId || !rows?.length) return c.json({ error: 'accountId and rows are required' }, 400);
+
+  const account = await prisma.account.findFirst({
+    where: { id: accountId, institution: { userId } },
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
 
   const created = await prisma.$transaction(
     rows.map((r) =>

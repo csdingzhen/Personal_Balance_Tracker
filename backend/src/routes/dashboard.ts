@@ -1,11 +1,16 @@
 import { Hono } from 'hono';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 import type { DashboardData, InstitutionGroup } from '../../../shared/types';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
 app.get('/', async (c) => {
+  const userId = c.get('userId');
+
   const institutions = await prisma.institution.findMany({
+    where: { userId },
     include: { accounts: { where: { hidden: false } } },
   });
 
@@ -14,7 +19,6 @@ app.get('/', async (c) => {
   const liabilities = allAccounts.filter((a) => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
   const netWorth = assets - liabilities;
 
-  // Generate 12-month history with a simulated upward trend
   const history = Array.from({ length: 12 }, (_, i) => {
     const d = new Date();
     d.setMonth(d.getMonth() - (11 - i));
@@ -40,6 +44,7 @@ app.get('/', async (c) => {
       type: a.type as 'checking' | 'savings' | 'credit' | 'investment',
       balance: a.balance,
       currency: a.currency,
+      isPlaidLinked: false,
     })),
     total: inst.accounts.reduce((s, a) => s + a.balance, 0),
   }));
@@ -47,6 +52,7 @@ app.get('/', async (c) => {
   const recentTransactions = await prisma.transaction.findMany({
     take: 8,
     orderBy: { date: 'desc' },
+    where: { account: { institution: { userId }, hidden: false } },
     include: { account: true },
   });
 

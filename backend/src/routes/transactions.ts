@@ -1,13 +1,16 @@
 import { Hono } from 'hono';
 import { prisma } from '../lib/prisma';
+import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
+app.use('*', requireAuth);
 
 app.get('/', async (c) => {
+  const userId = c.get('userId');
   const { search, accountId, category, startDate, endDate, page = '1', limit = '50' } = c.req.query();
 
   const where: Parameters<typeof prisma.transaction.findMany>[0]['where'] = {
-    account: { hidden: false },
+    account: { institution: { userId }, hidden: false },
   };
 
   if (accountId) where.accountId = accountId;
@@ -57,7 +60,14 @@ app.get('/', async (c) => {
 });
 
 app.post('/', async (c) => {
+  const userId = c.get('userId');
   const body = await c.req.json();
+
+  const account = await prisma.account.findFirst({
+    where: { id: body.accountId, institution: { userId } },
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
   const tx = await prisma.transaction.create({
     data: {
       accountId: body.accountId,
@@ -72,10 +82,11 @@ app.post('/', async (c) => {
 });
 
 app.get('/categories', async (c) => {
+  const userId = c.get('userId');
   const rows = await prisma.transaction.findMany({
     select: { category: true },
     distinct: ['category'],
-    where: { category: { not: null } },
+    where: { category: { not: null }, account: { institution: { userId } } },
   });
   return c.json(rows.map((r) => r.category).filter(Boolean));
 });

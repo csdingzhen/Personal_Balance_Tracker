@@ -1,5 +1,7 @@
-import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Wallet, Receipt, PiggyBank, TrendingUp, Upload, Link2 } from 'lucide-react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Wallet, Receipt, PiggyBank, TrendingUp, Upload, Link2, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../api/client';
 
 const nav = [
   { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
@@ -12,6 +14,15 @@ const nav = [
 ];
 
 export default function Sidebar() {
+  const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+
+  async function logout() {
+    await api.post('/auth/logout', {}).catch(() => {});
+    setUser(null);
+    navigate('/login', { replace: true });
+  }
+
   return (
     <aside className="w-[220px] flex-shrink-0 flex flex-col bg-bg-deep border-r border-border-soft h-screen sticky top-0">
       {/* Logo */}
@@ -50,9 +61,25 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-border-soft">
-        <p className="eyebrow">Personal Finance</p>
+      {/* User + logout */}
+      <div className="px-3 py-3 border-t border-border-soft">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full bg-accent-soft flex items-center justify-center shrink-0">
+              <span className="text-accent text-[11px] font-semibold uppercase">
+                {user?.username?.[0] ?? '?'}
+              </span>
+            </div>
+            <span className="text-text-2 text-sm truncate">{user?.username}</span>
+          </div>
+          <button
+            onClick={logout}
+            title="Sign out"
+            className="p-1.5 rounded text-text-dim hover:text-text hover:bg-surface transition-colors"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
       </div>
     </aside>
   );
