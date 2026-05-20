@@ -7,6 +7,25 @@ import { requireAuth, type AuthEnv } from '../middleware/requireAuth';
 
 const app = new Hono<AuthEnv>();
 
+/** Map Plaid's raw type/subtype to our 4 canonical account types. */
+function normalizeType(plaidType: string, plaidSubtype: string | null): string {
+  const s = (plaidSubtype ?? plaidType).toLowerCase().trim();
+  if (s === 'checking') return 'checking';
+  if (['savings', 'money market', 'cd', 'prepaid', 'hsa'].includes(s)) return 'savings';
+  if (['credit card', 'credit', 'paypal'].includes(s)) return 'credit';
+  if ([
+    'investment', 'brokerage', '401k', 'ira', 'roth', 'roth 401k',
+    '403b', '457b', 'cash management', 'mutual fund', 'retirement',
+    'student', '529', 'ugma', 'utma',
+  ].includes(s)) return 'investment';
+  return 'checking'; // safe fallback
+}
+
+/** Credit accounts: Plaid returns positive = amount owed; store as negative (liability). */
+function normalizeBalance(balance: number, type: string): number {
+  return type === 'credit' ? -Math.abs(balance) : balance;
+}
+
 function plaidErrorMessage(err: unknown): string {
   const e = err as { response?: { data?: { error_message?: string; error_code?: string } } };
   if (e?.response?.data?.error_message) {
@@ -64,17 +83,19 @@ app.post('/exchange', requireAuth, async (c) => {
     });
 
     for (const pa of plaidAccounts) {
+      const type = normalizeType(pa.type, pa.subtype ?? null);
+      const balance = normalizeBalance(pa.balances.current ?? 0, type);
       await prisma.account.upsert({
         where: { plaidAccountId: pa.account_id },
         create: {
           institutionId: institution.id,
           name: pa.name,
-          type: pa.subtype ?? pa.type,
-          balance: pa.balances.current ?? 0,
+          type,
+          balance,
           currency: pa.balances.iso_currency_code ?? 'USD',
           plaidAccountId: pa.account_id,
         },
-        update: { balance: pa.balances.current ?? 0, name: pa.name },
+        update: { balance, name: pa.name, type },
       });
     }
 
@@ -109,9 +130,11 @@ app.post('/sync/:institutionId', requireAuth, async (c) => {
 
     const accountsRes = await client.accountsGet({ access_token: accessToken });
     for (const pa of accountsRes.data.accounts) {
+      const type = normalizeType(pa.type, pa.subtype ?? null);
+      const balance = normalizeBalance(pa.balances.current ?? 0, type);
       await prisma.account.updateMany({
         where: { plaidAccountId: pa.account_id },
-        data: { balance: pa.balances.current ?? 0 },
+        data: { balance, type },
       });
     }
 
