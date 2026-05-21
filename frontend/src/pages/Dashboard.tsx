@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell,
+  AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer,
 } from 'recharts';
-import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Building2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { DashboardData, Transaction, InvestmentSummary } from '@shared/types';
 
-const DONUT_COLORS = ['oklch(0.86 0.13 200)','oklch(0.80 0.15 155)','oklch(0.83 0.13 80)','oklch(0.72 0.16 28)','oklch(0.78 0.13 290)','oklch(0.82 0.14 45)'];
 
 function fmtCurrency(n: number, compact = false) {
   if (compact && Math.abs(n) >= 1000)
@@ -21,10 +21,20 @@ function fmtFull(n: number) {
 const RANGES = ['1M', '3M', '6M', '1Y', 'ALL'] as const;
 type Range = typeof RANGES[number];
 
-function filterHistory(history: { date: string; value: number }[], range: Range) {
-  if (range === 'ALL') return history;
-  const n = range === '1M' ? 1 : range === '3M' ? 3 : range === '6M' ? 6 : 12;
-  return history.slice(-n);
+/** Format x-axis tick depending on data granularity. */
+function fmtTick(date: string, range: Range): string {
+  if (range === '1M') {
+    // date is YYYY-MM-DD — show "May 3" style
+    const d = new Date(date + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  if (range === '3M' || range === '6M') {
+    // date is YYYY-MM-DD — show "May 12" abbreviated
+    const d = new Date(date + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  // date is YYYY-MM — show "Jan 26"
+  return date.slice(5); // MM
 }
 
 // ── Spending Calendar ─────────────────────────────────────────────────────────
@@ -93,10 +103,14 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [investments, setInvestments] = useState<InvestmentSummary | null>(null);
   const [calTxs, setCalTxs] = useState<Transaction[]>([]);
-  const [range, setRange] = useState<Range>('6M');
-  const [activeSlice, setActiveSlice] = useState<{ name: string; value: number } | null>(null);
+  const [tab, setTab] = useState<'overview' | 'networth'>('overview');
+  const [range, setRange] = useState<Range>('1M');
+  const [nwView, setNwView] = useState<'all' | 'assets' | 'liabilities'>('all');
+  const [chartData, setChartData] = useState<{ date: string; value: number }[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Load dashboard + investments + calendar transactions once
   useEffect(() => {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -115,14 +129,19 @@ export default function Dashboard() {
       .catch((e) => setError(e.message));
   }, []);
 
-  const chartData = useMemo(() => data ? filterHistory(data.history, range) : [], [data, range]);
-  const prevNetWorth = data?.history.length ? data.history[Math.max(0, data.history.length - 2)].value : 0;
+  // Reload chart whenever range or view changes
+  useEffect(() => {
+    setChartLoading(true);
+    const view = tab === 'networth' ? nwView : 'all';
+    api.get<{ date: string; value: number }[]>(`/dashboard/history?range=${range}&view=${view}`)
+      .then(setChartData)
+      .finally(() => setChartLoading(false));
+  }, [range, nwView, tab]);
+
+  const prevNetWorth = chartData.length >= 2 ? chartData[chartData.length - 2].value : 0;
   const change = data ? data.netWorth - prevNetWorth : 0;
   const changePct = prevNetWorth > 0 ? (change / prevNetWorth) * 100 : 0;
 
-  const pieData = useMemo(() =>
-    investments?.holdings.map(h => ({ name: h.ticker, value: Math.round(h.shares * h.currentPrice) })) ?? [],
-  [investments]);
 
   if (error) return <div className="p-8 text-negative text-sm">{error}</div>;
   if (!data) return (
@@ -132,71 +151,103 @@ export default function Dashboard() {
     </div>
   );
 
-  // Cash = checking + savings; Investing = investment accounts
-  const cashTotal = data.accountsByInstitution
-    .flatMap(g => g.accounts)
-    .filter(a => a.type === 'checking' || a.type === 'savings')
-    .reduce((s, a) => s + a.balance, 0);
-  const investTotal = data.accountsByInstitution
-    .flatMap(g => g.accounts)
-    .filter(a => a.type === 'investment')
-    .reduce((s, a) => s + a.balance, 0);
+  // ── Derived values used in both tabs ──────────────────────────────────────
+  const allAccounts = data.accountsByInstitution.flatMap(g => g.accounts);
+  const cashTotal   = allAccounts.filter(a => a.type === 'checking' || a.type === 'savings').reduce((s, a) => s + a.balance, 0);
+  const investTotal = allAccounts.filter(a => a.type === 'investment').reduce((s, a) => s + a.balance, 0);
+  const debtTotal   = allAccounts.filter(a => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
+  const grossTotal  = cashTotal + investTotal + debtTotal;
+
+  // Values & colors for the chart depending on active view
+  const chartMeta = {
+    all:         { label: 'Net Worth',   value: data.netWorth,          color: 'oklch(0.86 0.13 200)', grad: 'nwGradOv' },
+    assets:      { label: 'Total Assets', value: data.totalAssets,      color: 'oklch(0.80 0.15 155)', grad: 'nwGradAs' },
+    liabilities: { label: 'Liabilities', value: data.totalLiabilities,  color: 'oklch(0.72 0.16 28)',  grad: 'nwGradLi' },
+  };
+  const activeView = tab === 'networth' ? nwView : 'all';
+  const cm = chartMeta[activeView];
 
   return (
     <div className="p-7 space-y-5 max-w-[1400px]">
 
-      {/* ── Region 1: Net Worth ──────────────────────────────────────── */}
+      {/* ── Tab navigation ────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 bg-surface border border-border-soft rounded-lg p-1 self-start w-fit">
+        {(['overview', 'networth'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`text-sm font-medium px-4 py-1.5 rounded transition-colors ${
+              tab === t ? 'bg-surface-hi text-text' : 'text-text-muted hover:text-text'
+            }`}>
+            {t === 'overview' ? 'Overview' : 'Net Worth'}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Net Worth chart card — shared by both tabs ────────────────── */}
       <section className="card p-6">
         <div className="flex items-start justify-between mb-5">
           <div>
-            <p className="eyebrow mb-2">Net Worth</p>
+            <p className="eyebrow mb-2">{cm.label}</p>
             <p className="num text-[38px] font-semibold text-text leading-none">
-              {fmtCurrency(data.netWorth)}
+              {fmtCurrency(Math.abs(cm.value))}
             </p>
             <div className={`flex items-center gap-1 mt-2 text-sm num ${change >= 0 ? 'text-positive' : 'text-negative'}`}>
               {change >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-              {fmtFull(change)} ({Math.abs(changePct).toFixed(1)}%) vs last month
+              {fmtFull(Math.abs(change))} ({Math.abs(changePct).toFixed(1)}%) vs last period
             </div>
           </div>
 
-          {/* Range toggle */}
-          <div className="flex gap-1">
-            {RANGES.map(r => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`btn text-xs h-[28px] px-3 ${r === range ? 'btn-primary' : ''}`}
-              >
-                {r}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-2">
+            {/* View toggle — only on Net Worth tab */}
+            {tab === 'networth' && (
+              <div className="flex gap-1">
+                {(['all', 'assets', 'liabilities'] as const).map(v => (
+                  <button key={v} onClick={() => setNwView(v)}
+                    className={`btn text-xs h-[26px] px-3 capitalize ${nwView === v ? 'btn-primary' : ''}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1">
+              {RANGES.map(r => (
+                <button key={r} onClick={() => setRange(r)}
+                  className={`btn text-xs h-[28px] px-3 ${r === range ? 'btn-primary' : ''}`}>
+                  {r}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="oklch(0.86 0.13 200)" stopOpacity={0.25} />
-                <stop offset="95%" stopColor="oklch(0.86 0.13 200)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.235 0.006 60)" vertical={false} />
-            <XAxis dataKey="date" tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
-              tickLine={false} axisLine={false} />
-            <YAxis tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
-              tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-            <Tooltip
-              contentStyle={{ background: 'oklch(0.195 0.005 60)', border: '1px solid oklch(0.235 0.006 60)', borderRadius: 10, fontFamily: 'Geist Mono', fontSize: 12 }}
-              labelStyle={{ color: 'oklch(0.62 0.006 60)' }}
-              formatter={(v: number) => [fmtCurrency(v), 'Net Worth']}
-            />
-            <Area type="monotone" dataKey="value" stroke="oklch(0.86 0.13 200)"
-              strokeWidth={1.8} fill="url(#nwGrad)" dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
+        <div className={`transition-opacity duration-150 ${chartLoading ? 'opacity-40' : 'opacity-100'}`}>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id={cm.grad} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={cm.color} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={cm.color} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.235 0.006 60)" vertical={false} />
+              <XAxis dataKey="date"
+                tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
+                tickLine={false} axisLine={false}
+                tickFormatter={(v) => fmtTick(v, range)}
+                interval="preserveStartEnd" />
+              <YAxis tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
+                tickLine={false} axisLine={false}
+                tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+              <Tooltip
+                contentStyle={{ background: 'oklch(0.195 0.005 60)', border: '1px solid oklch(0.235 0.006 60)', borderRadius: 10, fontFamily: 'Geist Mono', fontSize: 12 }}
+                labelStyle={{ color: 'oklch(0.62 0.006 60)' }}
+                formatter={(v: number) => [fmtCurrency(v), cm.label]}
+              />
+              <Area type="monotone" dataKey="value" stroke={cm.color}
+                strokeWidth={1.8} fill={`url(#${cm.grad})`} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
 
-        {/* 4-stat strip */}
         <div className="grid grid-cols-4 gap-4 mt-5 pt-5 border-t border-border-soft">
           {[
             { label: 'Assets',      value: data.totalAssets,      color: 'text-positive' },
@@ -214,132 +265,201 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* ── Region 2: Calendar + Recent Transactions ─────────────────── */}
-      <div className="grid grid-cols-5 gap-5">
-        <div className="col-span-3 card p-5">
-          <div className="card-head px-0 pt-0 pb-4 mb-4 border-b border-border-soft">
-            <p className="text-text font-medium">
-              Spending — {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </p>
-          </div>
-          <SpendingCalendar transactions={calTxs} />
-        </div>
-
-        <div className="col-span-2 card">
-          <div className="card-head">
-            <p className="text-text font-medium">Recent</p>
-          </div>
-          <div className="divide-y divide-border-soft">
-            {data.recentTransactions.map((t: Transaction) => (
-              <div key={t.id} className="flex items-center justify-between px-5 py-3">
-                <div className="min-w-0">
-                  <p className="text-text-2 text-sm truncate">{t.merchantName ?? '—'}</p>
-                  <p className="eyebrow mt-0.5">{t.category ?? '—'}</p>
-                </div>
-                <p className={`num text-sm font-medium shrink-0 ml-3 ${t.amount > 0 ? 'text-positive' : 'text-text'}`}>
-                  {t.amount > 0 ? '+' : '-'}{fmtFull(t.amount)}
+      {/* ── Overview tab: spending calendar + portfolio ────────────────── */}
+      {tab === 'overview' && (
+        <>
+          <section className="card overflow-hidden">
+            <div className="grid grid-cols-5 divide-x divide-border-soft">
+              <div className="col-span-3 p-5">
+                <p className="text-text font-medium text-sm mb-3">
+                  Spending — {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </p>
+                <SpendingCalendar transactions={calTxs} />
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Region 3: Investments ──────────────────────────────────────── */}
-      {investments && investments.holdings.length > 0 && (
-        <section className="card">
-          <div className="card-head">
-            <p className="text-text font-medium">Portfolio</p>
-            <div className="flex gap-3">
-              <span className="num text-sm text-positive">
-                {investments.totalGainLoss >= 0 ? '+' : ''}{fmtFull(investments.totalGainLoss)}
-              </span>
-              <span className="num text-sm text-text-muted">
-                {fmtCurrency(investments.totalValue)}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-5 gap-0 divide-x divide-border-soft">
-            {/* Donut */}
-            <div className="col-span-2 p-5 flex flex-col items-center">
-              <div className="relative" style={{ width: 200, height: 200 }}>
-                <ResponsiveContainer width={200} height={200}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%" cy="50%"
-                      innerRadius={65} outerRadius={90}
-                      dataKey="value"
-                      paddingAngle={2}
-                      onMouseEnter={(_, i) => setActiveSlice({ name: pieData[i].name, value: pieData[i].value })}
-                      onMouseLeave={() => setActiveSlice(null)}
-                    >
-                      {pieData.map((_, i) => (
-                        <Cell
-                          key={i}
-                          fill={DONUT_COLORS[i % DONUT_COLORS.length]}
-                          opacity={activeSlice ? (activeSlice.name === pieData[i].name ? 1 : 0.3) : 1}
-                          style={{ cursor: 'default', outline: 'none' }}
-                        />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                {/* Center readout */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  {activeSlice ? (
-                    <>
-                      <p className="eyebrow">{activeSlice.name}</p>
-                      <p className="num text-lg font-semibold text-text mt-0.5">{fmtCurrency(activeSlice.value)}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="eyebrow">Portfolio</p>
-                      <p className="num text-lg font-semibold text-text mt-0.5">{fmtCurrency(investments.totalValue)}</p>
-                    </>
-                  )}
+              <div className="col-span-2 flex flex-col">
+                <div className="px-5 py-4 border-b border-border-soft">
+                  <p className="text-text font-medium text-sm">Recent</p>
+                </div>
+                <div className="divide-y divide-border-soft overflow-y-auto">
+                  {data.recentTransactions.map((t: Transaction) => (
+                    <div key={t.id} className="flex items-center justify-between px-5 py-3">
+                      <div className="min-w-0">
+                        <p className="text-text-2 text-sm truncate">{t.merchantName ?? '—'}</p>
+                        <p className="eyebrow mt-0.5">{t.category ?? '—'}</p>
+                      </div>
+                      <p className={`num text-sm font-medium shrink-0 ml-3 ${t.amount > 0 ? 'text-positive' : 'text-text'}`}>
+                        {t.amount > 0 ? '+' : '-'}{fmtFull(t.amount)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
+          </section>
 
-            {/* Holdings table */}
-            <div className="col-span-3">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-[10px] text-text-dim uppercase tracking-[0.1em] font-mono">
-                    <th className="text-left px-5 py-3">Ticker</th>
-                    <th className="text-right px-5 py-3">Value</th>
-                    <th className="text-right px-5 py-3">Return</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border-soft">
-                  {investments.holdings.slice(0, 6).map((h) => {
-                    const value = h.shares * h.currentPrice;
-                    const gl = value - h.shares * h.costBasis;
-                    const glPct = h.costBasis > 0 ? (gl / (h.shares * h.costBasis)) * 100 : 0;
-                    const weight = investments.totalValue > 0 ? value / investments.totalValue : 0;
-                    return (
-                      <tr key={h.id} className="hover:bg-surface-2 transition-colors">
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-2">
-                            <span className="num font-semibold text-accent text-sm">{h.ticker}</span>
-                            <div className="h-1 rounded-full bg-accent" style={{ width: `${weight * 60}px`, opacity: 0.4 }} />
+          {investments && investments.holdings.length > 0 && (
+            <section className="card overflow-hidden">
+              <div className="card-head">
+                <div className="flex items-center gap-3">
+                  <p className="text-text font-medium">Portfolio</p>
+                  <span className={`num text-sm font-medium ${investments.totalGainLoss >= 0 ? 'text-positive' : 'text-negative'}`}>
+                    {investments.totalGainLoss >= 0 ? '+' : ''}{fmtFull(investments.totalGainLoss)}
+                    {' '}({investments.totalGainLossPct >= 0 ? '+' : ''}{investments.totalGainLossPct.toFixed(1)}%)
+                  </span>
+                </div>
+                <span className="num text-sm text-text-muted">{fmtCurrency(investments.totalValue)}</span>
+              </div>
+              <div className="grid grid-cols-5 divide-x divide-border-soft">
+                <div className="col-span-3 p-5">
+                  <p className="eyebrow mb-3">30-Day Performance</p>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={investments.performanceHistory} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="perfGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor="oklch(0.80 0.15 155)" stopOpacity={0.2} />
+                          <stop offset="95%" stopColor="oklch(0.80 0.15 155)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.235 0.006 60)" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
+                        tickLine={false} axisLine={false}
+                        tickFormatter={(v: string) => new Date(v + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        interval="preserveStartEnd" />
+                      <YAxis tick={{ fill: 'oklch(0.46 0.007 60)', fontSize: 10, fontFamily: 'Geist Mono' }}
+                        tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} domain={['auto', 'auto']} />
+                      <Tooltip contentStyle={{ background: 'oklch(0.195 0.005 60)', border: '1px solid oklch(0.235 0.006 60)', borderRadius: 10, fontFamily: 'Geist Mono', fontSize: 12 }}
+                        formatter={(v: number) => [fmtCurrency(v), 'Value']} />
+                      <Area type="monotone" dataKey="value" stroke="oklch(0.80 0.15 155)" strokeWidth={1.8} fill="url(#perfGrad)" dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="col-span-2">
+                  <div className="px-5 py-3 border-b border-border-soft"><p className="eyebrow">Top Holdings</p></div>
+                  <div className="divide-y divide-border-soft">
+                    {investments.holdings.slice().sort((a, b) => b.shares * b.currentPrice - a.shares * a.currentPrice).slice(0, 5).map(h => {
+                      const value = h.shares * h.currentPrice;
+                      const gl = value - h.shares * h.costBasis;
+                      const glPct = h.costBasis > 0 ? (gl / (h.shares * h.costBasis)) * 100 : 0;
+                      return (
+                        <div key={h.id} className="flex items-center justify-between px-5 py-3">
+                          <div className="min-w-0">
+                            <span className="num text-sm font-semibold text-accent">{h.ticker}</span>
+                            <p className="text-text-dim text-[11px] mt-0.5 truncate max-w-[120px]">{h.name}</p>
                           </div>
-                          <p className="text-text-dim text-[11px] mt-0.5 truncate max-w-[140px]">{h.name}</p>
-                        </td>
-                        <td className="px-5 py-3 text-right num text-sm text-text">{fmtCurrency(value)}</td>
-                        <td className={`px-5 py-3 text-right num text-sm ${gl >= 0 ? 'text-positive' : 'text-negative'}`}>
-                          {gl >= 0 ? '+' : ''}{glPct.toFixed(1)}%
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <div className="text-right shrink-0 ml-3">
+                            <p className="num text-sm text-text">{fmtCurrency(value)}</p>
+                            <p className={`num text-xs ${glPct >= 0 ? 'text-positive' : 'text-negative'}`}>{glPct >= 0 ? '+' : ''}{glPct.toFixed(1)}%</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ── Net Worth tab: accounts + asset breakdown ──────────────────── */}
+      {tab === 'networth' && (
+        <div className="grid grid-cols-3 gap-5">
+
+          {/* Account overview — left 2 cols */}
+          <div className="col-span-2 space-y-4">
+            {data.accountsByInstitution.map(({ institution, accounts }) => {
+              const filtered = accounts.filter(a =>
+                nwView === 'all' ? true :
+                nwView === 'assets' ? a.balance > 0 :
+                a.balance < 0
+              );
+              if (filtered.length === 0) return null;
+              return (
+                <div key={institution.id} className="card overflow-hidden">
+                  <div className="card-head">
+                    <div className="flex items-center gap-3">
+                      {institution.logo ? (
+                        <img src={institution.logo} alt={institution.name} className="w-7 h-7 rounded-full"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full bg-surface-hi flex items-center justify-center">
+                          <Building2 size={13} className="text-text-dim" />
+                        </div>
+                      )}
+                      <p className="text-text font-medium text-sm">{institution.name}</p>
+                    </div>
+                    <p className={`num text-sm font-medium ${filtered.reduce((s, a) => s + a.balance, 0) < 0 ? 'text-negative' : 'text-text'}`}>
+                      {fmtFull(filtered.reduce((s, a) => s + a.balance, 0))}
+                    </p>
+                  </div>
+                  {filtered.map(a => (
+                    <div key={a.id} className="flex items-center justify-between px-5 py-3 border-b border-border-soft last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{
+                          background: a.type === 'checking' ? 'oklch(0.76 0.12 220)'
+                            : a.type === 'savings' ? 'oklch(0.80 0.15 155)'
+                            : a.type === 'credit' ? 'oklch(0.72 0.16 28)'
+                            : 'oklch(0.86 0.13 200)',
+                        }} />
+                        <p className="text-text-2 text-sm">{a.name}</p>
+                        <p className="eyebrow">{a.type}</p>
+                      </div>
+                      <p className={`num text-sm font-medium ${a.balance < 0 ? 'text-negative' : 'text-text'}`}>
+                        {a.balance < 0 ? '-' : ''}{fmtFull(a.balance)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Asset breakdown — right 1 col */}
+          <div className="card p-5 h-fit">
+            <p className="text-text font-medium text-sm mb-5">Asset Breakdown</p>
+
+            {/* Stacked bar */}
+            {grossTotal > 0 && (
+              <div className="w-full h-2.5 rounded-full overflow-hidden flex gap-px mb-5">
+                {cashTotal > 0  && <div className="h-full" style={{ width: `${(cashTotal / grossTotal) * 100}%`, background: 'oklch(0.80 0.15 155)' }} />}
+                {investTotal > 0 && <div className="h-full" style={{ width: `${(investTotal / grossTotal) * 100}%`, background: 'oklch(0.86 0.13 200)' }} />}
+                {debtTotal > 0  && <div className="h-full" style={{ width: `${(debtTotal / grossTotal) * 100}%`, background: 'oklch(0.72 0.16 28)' }} />}
+              </div>
+            )}
+
+            {/* Breakdown list */}
+            <div className="space-y-3">
+              {[
+                { label: 'Cash',        amount: cashTotal,   color: 'oklch(0.80 0.15 155)' },
+                { label: 'Investing',   amount: investTotal, color: 'oklch(0.86 0.13 200)' },
+                { label: 'Liabilities', amount: debtTotal,   color: 'oklch(0.72 0.16 28)' },
+              ].map(({ label, amount, color }) => {
+                const pct = grossTotal > 0 ? (amount / grossTotal) * 100 : 0;
+                return (
+                  <div key={label} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                      <span className="text-text-2 text-sm">{label}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="num text-sm text-text">{fmtFull(amount)}</span>
+                      <span className="num text-xs text-text-dim ml-2">{pct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-border-soft">
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted text-sm">Net Worth</span>
+                <span className={`num text-sm font-semibold ${data.netWorth >= 0 ? 'text-positive' : 'text-negative'}`}>
+                  {data.netWorth < 0 ? '-' : ''}{fmtFull(data.netWorth)}
+                </span>
+              </div>
             </div>
           </div>
-        </section>
+        </div>
       )}
     </div>
   );
