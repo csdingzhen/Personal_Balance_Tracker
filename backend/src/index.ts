@@ -17,6 +17,7 @@ import budgets from './routes/budgets';
 import investments from './routes/investments';
 import plaidRoutes from './routes/plaid';
 import importRoutes from './routes/import';
+import spendingRoutes from './routes/spending';
 
 const app = new Hono();
 
@@ -37,6 +38,7 @@ app.route('/api/budgets', budgets);
 app.route('/api/investments', investments);
 app.route('/api/plaid', plaidRoutes);
 app.route('/api/import', importRoutes);
+app.route('/api/spending', spendingRoutes);
 
 app.get('/', (c) => c.json({ status: 'ok', message: 'Personal Balance Tracker API' }));
 

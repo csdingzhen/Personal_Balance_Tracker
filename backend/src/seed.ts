@@ -9,6 +9,13 @@ import { prisma } from './lib/prisma';
 async function main() {
   console.log('Seeding database...');
 
+  const existingUsers = await prisma.user.count();
+  if (existingUsers > 0) {
+    console.log(`Database already has ${existingUsers} user(s). Skipping seed to protect existing data.`);
+    console.log('To force re-seed, run: npm run db:reset && npm run seed');
+    return;
+  }
+
   await prisma.investment.deleteMany();
   await prisma.budget.deleteMany();
   await prisma.transaction.deleteMany();
@@ -73,13 +80,23 @@ async function main() {
     { accountId: sofiCC.id, date: '2026-04-17', merchantName: 'Hilton Hotels', amount: -245.00, category: 'Travel' },
     { accountId: sofiCC.id, date: '2026-04-18', merchantName: 'Uber', amount: -24.50, category: 'Transportation' },
     { accountId: boaChecking.id, date: '2026-04-20', merchantName: 'CVS Pharmacy', amount: -34.56, category: 'Healthcare' },
+    { accountId: boaCC.id, date: '2026-04-02', merchantName: 'Netflix', amount: -15.99, category: 'Entertainment' },
+    { accountId: boaCC.id, date: '2026-04-03', merchantName: 'Spotify', amount: -10.99, category: 'Entertainment' },
     { accountId: boaCC.id, date: '2026-04-22', merchantName: 'Apple.com', amount: -14.99, category: 'Entertainment' },
+    { accountId: boaCC.id, date: '2026-04-23', merchantName: 'Hulu', amount: -17.99, category: 'Entertainment' },
     { accountId: boaChecking.id, date: '2026-04-25', merchantName: 'Costco Wholesale', amount: -234.56, category: 'Groceries' },
     { accountId: boaCC.id, date: '2026-04-28', merchantName: 'DoorDash', amount: -45.23, category: 'Dining' },
     { accountId: boaChecking.id, date: '2026-03-01', merchantName: 'Direct Deposit - Employer', amount: 5500.00, category: 'Income' },
     { accountId: boaChecking.id, date: '2026-03-01', merchantName: 'Landlord Rent Payment', amount: -2200.00, category: 'Housing' },
     { accountId: boaChecking.id, date: '2026-03-03', merchantName: 'Pacific Gas & Electric', amount: -112.34, category: 'Utilities' },
+    { accountId: boaCC.id, date: '2026-03-03', merchantName: 'Spotify', amount: -10.99, category: 'Entertainment' },
     { accountId: boaCC.id, date: '2026-03-05', merchantName: 'Netflix', amount: -15.99, category: 'Entertainment' },
+    { accountId: boaCC.id, date: '2026-03-22', merchantName: 'Apple.com', amount: -14.99, category: 'Entertainment' },
+    { accountId: boaChecking.id, date: '2026-04-21', merchantName: 'USAA Insurance', amount: -178.50, category: 'Insurance' },
+    { accountId: boaChecking.id, date: '2026-05-03', merchantName: 'Pacific Gas & Electric', amount: -101.20, category: 'Utilities' },
+    { accountId: boaChecking.id, date: '2026-05-21', merchantName: 'USAA Insurance', amount: -178.50, category: 'Insurance' },
+    { accountId: boaCC.id, date: '2026-05-22', merchantName: 'Apple.com', amount: -14.99, category: 'Entertainment' },
+    { accountId: boaCC.id, date: '2026-05-23', merchantName: 'Hulu', amount: -17.99, category: 'Entertainment' },
     { accountId: boaChecking.id, date: '2026-03-07', merchantName: "Trader Joe's", amount: -167.45, category: 'Groceries' },
     { accountId: boaCC.id, date: '2026-03-10', merchantName: 'H&M', amount: -156.78, category: 'Shopping' },
     { accountId: sofiChecking.id, date: '2026-03-14', merchantName: 'Planet Fitness', amount: -24.99, category: 'Health & Fitness' },
